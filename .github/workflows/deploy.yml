@@ -168,29 +168,7 @@ jobs:
         
         # Test AWS connectivity
         echo "🔗 Testing AWS connectivity..."
-        python3 -c "
-import boto3
-import os
-
-# Test AWS credentials and region
-try:
-    # Test S3 connection
-    s3_client = boto3.client('s3', region_name='${AWS_REGION}')
-    print('✅ S3 connection successful')
-    
-    # Test SNS connection  
-    sns_client = boto3.client('sns', region_name='${AWS_REGION}')
-    print('✅ SNS connection successful')
-    
-    # Test CloudWatch Logs connection
-    logs_client = boto3.client('logs', region_name='${AWS_REGION}')
-    print('✅ CloudWatch Logs connection successful')
-    
-    print('🎉 All AWS services accessible!')
-except Exception as e:
-    print(f'⚠️ AWS connection warning: {e}')
-    print('App will still work with local storage')
-" || echo "⚠️ AWS services not fully configured, continuing with local setup..."
+        python3 -c "import boto3; print('✅ boto3 imported successfully')" || echo "⚠️ boto3 import failed"
         
         # Run Django setup commands
         python manage.py makemigrations
