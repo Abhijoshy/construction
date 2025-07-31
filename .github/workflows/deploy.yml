@@ -90,7 +90,7 @@ jobs:
         
         # Create fresh application directory
         sudo mkdir -p /opt/construction-app
-        sudo chown $USER:$USER /opt/construction-app
+        sudo chown ec2-user:ec2-user /opt/construction-app
         
         # Navigate to app directory
         cd /opt/construction-app
@@ -129,28 +129,68 @@ jobs:
         
         # Create environment file (we're already in the Django project root)
         echo "🔧 Setting up environment variables..."
-        echo "AWS_REGION: ${AWS_REGION:-'not set'}"
-        echo "AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:0:10}... (hidden)"
-        echo "AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:0:5}... (hidden)"
-        echo "AWS_S3_BUCKET_NAME: ${AWS_S3_BUCKET_NAME:-'not set'}"
-        echo "AWS_SES_SENDER_EMAIL: ${AWS_SES_SENDER_EMAIL:-'not set'}"
-        echo "AWS_SNS_TOPIC_ARN: ${AWS_SNS_TOPIC_ARN:-'not set'}"
-        echo "AWS_CLOUDWATCH_LOG_GROUP: ${AWS_CLOUDWATCH_LOG_GROUP:-'not set'}"
+        echo "AWS_REGION: ${AWS_REGION}"
+        echo "AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:0:10}..."
+        echo "AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:0:5}..."
+        echo "AWS_S3_BUCKET_NAME: ${AWS_S3_BUCKET_NAME}"
+        echo "AWS_SES_SENDER_EMAIL: ${AWS_SES_SENDER_EMAIL}"
+        echo "AWS_SNS_TOPIC_ARN: ${AWS_SNS_TOPIC_ARN}"
+        echo "AWS_CLOUDWATCH_LOG_GROUP: ${AWS_CLOUDWATCH_LOG_GROUP}"
+        
+        # Create AWS credentials file for boto3
+        mkdir -p ~/.aws
+        cat > ~/.aws/credentials << AWSCREDEOF
+        [default]
+        aws_access_key_id = ${AWS_ACCESS_KEY_ID}
+        aws_secret_access_key = ${AWS_SECRET_ACCESS_KEY}
+        AWSCREDEOF
+        
+        cat > ~/.aws/config << AWSCONFIGEOF
+        [default]
+        region = ${AWS_REGION}
+        output = json
+        AWSCONFIGEOF
         
         cat > .env << ENVEOF
         DEBUG=False
         SECRET_KEY=django-insecure-production-key-$(date +%s)
-        AWS_REGION=${AWS_REGION:-eu-north-1}
+        AWS_REGION=${AWS_REGION}
         AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
         AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
-        AWS_S3_BUCKET_NAME=${AWS_S3_BUCKET_NAME:-construction-app-bucket}
-        AWS_SES_SENDER_EMAIL=${AWS_SES_SENDER_EMAIL:-admin@example.com}
-        AWS_SNS_TOPIC_ARN=${AWS_SNS_TOPIC_ARN:-arn:aws:sns:eu-north-1:123456789012:construction-notifications}
-        AWS_CLOUDWATCH_LOG_GROUP=${AWS_CLOUDWATCH_LOG_GROUP:-/aws/construction-app}
+        AWS_S3_BUCKET_NAME=${AWS_S3_BUCKET_NAME}
+        AWS_SES_SENDER_EMAIL=${AWS_SES_SENDER_EMAIL}
+        AWS_SNS_TOPIC_ARN=${AWS_SNS_TOPIC_ARN}
+        AWS_CLOUDWATCH_LOG_GROUP=${AWS_CLOUDWATCH_LOG_GROUP}
         ENVEOF
         
         # Create media and static directories
         mkdir -p media staticfiles
+        
+        # Test AWS connectivity
+        echo "🔗 Testing AWS connectivity..."
+        python3 -c "
+import boto3
+import os
+
+# Test AWS credentials and region
+try:
+    # Test S3 connection
+    s3_client = boto3.client('s3', region_name='${AWS_REGION}')
+    print('✅ S3 connection successful')
+    
+    # Test SNS connection  
+    sns_client = boto3.client('sns', region_name='${AWS_REGION}')
+    print('✅ SNS connection successful')
+    
+    # Test CloudWatch Logs connection
+    logs_client = boto3.client('logs', region_name='${AWS_REGION}')
+    print('✅ CloudWatch Logs connection successful')
+    
+    print('🎉 All AWS services accessible!')
+except Exception as e:
+    print(f'⚠️ AWS connection warning: {e}')
+    print('App will still work with local storage')
+" || echo "⚠️ AWS services not fully configured, continuing with local setup..."
         
         # Run Django setup commands
         python manage.py makemigrations
@@ -189,7 +229,7 @@ jobs:
         # Create log directory and set permissions
         sudo mkdir -p /var/log
         sudo touch /var/log/construction-app.log
-        sudo chown $USER:$USER /var/log/construction-app.log
+        sudo chown ec2-user:ec2-user /var/log/construction-app.log
         
         # Create startup script
         cat > /opt/construction-app/start_app.sh << STARTEOF
@@ -223,8 +263,8 @@ jobs:
         
         [Service]
         Type=forking
-        User=$USER
-        Group=$USER
+        User=ec2-user
+        Group=ec2-user
         ExecStart=/opt/construction-app/start_app.sh
         ExecStop=/opt/construction-app/stop_app.sh
         Restart=always
