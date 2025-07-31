@@ -26,8 +26,7 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        cd myproject
-        pip install -r requirements.txt
+        pip install -r myproject/requirements.txt
         
     - name: Run Django tests
       run: |
@@ -71,6 +70,9 @@ jobs:
         
         # Stop existing service if running
         sudo systemctl stop construction-app || true
+        
+        # Kill any existing Django runserver processes
+        pkill -f "manage.py runserver" || true
         
         # Remove existing application directory completely
         sudo rm -rf /opt/construction-app || true
@@ -144,6 +146,35 @@ jobs:
         cat > setup_service.sh << 'EOF'
         #!/bin/bash
         
+        # Create log directory and set permissions
+        sudo mkdir -p /var/log
+        sudo touch /var/log/construction-app.log
+        sudo chown ec2-user:ec2-user /var/log/construction-app.log
+        
+        # Create startup script
+        cat > /opt/construction-app/start_app.sh << STARTEOF
+        #!/bin/bash
+        cd /opt/construction-app/myproject
+        source ../venv/bin/activate
+        nohup python manage.py runserver 0.0.0.0:8000 > /var/log/construction-app.log 2>&1 &
+        echo \$! > /opt/construction-app/app.pid
+        STARTEOF
+        
+        chmod +x /opt/construction-app/start_app.sh
+        
+        # Create stop script
+        cat > /opt/construction-app/stop_app.sh << STOPEOF
+        #!/bin/bash
+        if [ -f /opt/construction-app/app.pid ]; then
+            kill \$(cat /opt/construction-app/app.pid) 2>/dev/null || true
+            rm -f /opt/construction-app/app.pid
+        fi
+        # Also kill any existing runserver processes
+        pkill -f "manage.py runserver" || true
+        STOPEOF
+        
+        chmod +x /opt/construction-app/stop_app.sh
+        
         # Create systemd service file
         sudo tee /etc/systemd/system/construction-app.service << SERVICEEOF
         [Unit]
@@ -151,15 +182,13 @@ jobs:
         After=network.target
         
         [Service]
-        Type=exec
+        Type=forking
         User=ec2-user
         Group=ec2-user
-        WorkingDirectory=/opt/construction-app/myproject
-        Environment=PATH=/opt/construction-app/venv/bin
-        Environment=PYTHONPATH=/opt/construction-app/myproject
-        ExecStart=/opt/construction-app/venv/bin/python manage.py runserver 0.0.0.0:8000
+        ExecStart=/opt/construction-app/start_app.sh
+        ExecStop=/opt/construction-app/stop_app.sh
         Restart=always
-        RestartSec=3
+        RestartSec=5
         
         [Install]
         WantedBy=multi-user.target
