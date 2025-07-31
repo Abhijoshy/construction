@@ -67,8 +67,18 @@ jobs:
         
         echo "🔄 Starting complete deployment process..."
         
-        # Stop existing service if running
-        sudo systemctl stop construction-app || true
+        # Update system and install required packages
+        echo "📦 Installing system dependencies..."
+        sudo yum update -y
+        sudo yum install -y git python3 python3-pip
+        
+        # Stop existing service if running (only if it exists)
+        if sudo systemctl list-units --full -all | grep -Fq "construction-app.service"; then
+            echo "🛑 Stopping existing service..."
+            sudo systemctl stop construction-app || true
+        else
+            echo "ℹ️ No existing service found to stop"
+        fi
         
         # Kill any existing Django runserver processes
         pkill -f "manage.py runserver" || true
@@ -78,7 +88,7 @@ jobs:
         
         # Create fresh application directory
         sudo mkdir -p /opt/construction-app
-        sudo chown ec2-user:ec2-user /opt/construction-app
+        sudo chown $USER:$USER /opt/construction-app
         
         # Navigate to app directory
         cd /opt/construction-app
@@ -91,18 +101,6 @@ jobs:
         ls -la
         echo "📁 Contents of current directory:"
         find . -name "*.txt" -o -name "manage.py" -o -name "requirements.txt" | head -20
-        echo "📋 Looking for requirements.txt file:"
-        find . -name "requirements.txt" -type f
-        
-        # Check if myproject directory exists
-        if [ -d "myproject" ]; then
-            echo "✅ myproject directory found"
-            ls -la myproject/
-        else
-            echo "❌ myproject directory not found"
-            echo "Available directories:"
-            ls -la
-        fi
         
         # Create virtual environment
         python3 -m venv venv
@@ -127,10 +125,7 @@ jobs:
             exit 1
         fi
         
-        # Navigate to Django project
-        cd myproject
-        
-        # Create environment file
+        # Create environment file (we're already in the Django project root)
         cat > .env << ENVEOF
         DEBUG=False
         SECRET_KEY=django-insecure-production-key-$(date +%s)
@@ -179,13 +174,13 @@ jobs:
         # Create log directory and set permissions
         sudo mkdir -p /var/log
         sudo touch /var/log/construction-app.log
-        sudo chown ec2-user:ec2-user /var/log/construction-app.log
+        sudo chown $USER:$USER /var/log/construction-app.log
         
         # Create startup script
         cat > /opt/construction-app/start_app.sh << STARTEOF
         #!/bin/bash
-        cd /opt/construction-app/myproject
-        source ../venv/bin/activate
+        cd /opt/construction-app
+        source venv/bin/activate
         nohup python manage.py runserver 0.0.0.0:8000 > /var/log/construction-app.log 2>&1 &
         echo \$! > /opt/construction-app/app.pid
         STARTEOF
@@ -213,8 +208,8 @@ jobs:
         
         [Service]
         Type=forking
-        User=ec2-user
-        Group=ec2-user
+        User=$USER
+        Group=$USER
         ExecStart=/opt/construction-app/start_app.sh
         ExecStop=/opt/construction-app/stop_app.sh
         Restart=always
