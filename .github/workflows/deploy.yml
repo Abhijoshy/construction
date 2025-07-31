@@ -1,0 +1,213 @@
+name: Complete CI/CD Pipeline for Construction App
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+env:
+  APP_DIR: /opt/construction-app
+  SERVICE_NAME: construction-app
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+      
+    - name: Setup Python 3.9
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r myproject/requirements.txt
+        
+    - name: Run Django tests
+      run: |
+        cd myproject
+        python manage.py test construction --verbosity=2
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+      
+    - name: Setup SSH
+      env:
+        PRIVATE_KEY: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+        HOST: ${{ secrets.HOST }}
+        USER: ${{ secrets.USER }}
+      run: |
+        echo "$PRIVATE_KEY" > private_key
+        chmod 600 private_key
+        
+    - name: Deploy to EC2
+      env:
+        HOST: ${{ secrets.HOST }}
+        USER: ${{ secrets.USER }}
+        AWS_REGION: ${{ secrets.AWS_REGION }}
+        AWS_S3_BUCKET_NAME: ${{ secrets.AWS_S3_BUCKET_NAME }}
+        AWS_SES_SENDER_EMAIL: ${{ secrets.AWS_SES_SENDER_EMAIL }}
+        AWS_SNS_TOPIC_ARN: ${{ secrets.AWS_SNS_TOPIC_ARN }}
+        AWS_CLOUDWATCH_LOG_GROUP: ${{ secrets.AWS_CLOUDWATCH_LOG_GROUP }}
+      run: |
+        # Create deployment script
+        cat > deploy_script.sh << 'EOF'
+        #!/bin/bash
+        set -e
+        
+        echo "🔄 Starting complete deployment process..."
+        
+        # Stop existing service if running
+        sudo systemctl stop construction-app || true
+        
+        # Remove existing application directory completely
+        sudo rm -rf /opt/construction-app || true
+        
+        # Create fresh application directory
+        sudo mkdir -p /opt/construction-app
+        sudo chown ec2-user:ec2-user /opt/construction-app
+        
+        # Navigate to app directory
+        cd /opt/construction-app
+        
+        # Clone the repository fresh
+        git clone https://github.com/Abhijoshy/construction.git .
+        
+        # Create virtual environment
+        python3 -m venv venv
+        source venv/bin/activate
+        
+        # Upgrade pip
+        pip install --upgrade pip
+        
+        # Install all dependencies
+        pip install -r myproject/requirements.txt
+        
+        # Navigate to Django project
+        cd myproject
+        
+        # Create environment file
+        cat > .env << ENVEOF
+        DEBUG=False
+        SECRET_KEY=django-insecure-production-key-$(date +%s)
+        AWS_REGION=${AWS_REGION}
+        AWS_S3_BUCKET_NAME=${AWS_S3_BUCKET_NAME}
+        AWS_SES_SENDER_EMAIL=${AWS_SES_SENDER_EMAIL}
+        AWS_SNS_TOPIC_ARN=${AWS_SNS_TOPIC_ARN}
+        AWS_CLOUDWATCH_LOG_GROUP=${AWS_CLOUDWATCH_LOG_GROUP}
+        ENVEOF
+        
+        # Create media and static directories
+        mkdir -p media staticfiles
+        
+        # Run Django setup commands
+        python manage.py makemigrations
+        python manage.py migrate
+        python manage.py collectstatic --noinput
+        
+        # Initialize the app with sample data
+        python manage.py init_construction
+        
+        echo "📦 Application setup completed successfully!"
+        EOF
+        
+        # Copy deployment script to EC2 and execute
+        scp -o StrictHostKeyChecking=no -i private_key deploy_script.sh ${USER}@${HOST}:~/
+        
+        # Execute deployment on EC2
+        ssh -o StrictHostKeyChecking=no -i private_key ${USER}@${HOST} \
+        "AWS_REGION='${AWS_REGION}' \
+         AWS_S3_BUCKET_NAME='${AWS_S3_BUCKET_NAME}' \
+         AWS_SES_SENDER_EMAIL='${AWS_SES_SENDER_EMAIL}' \
+         AWS_SNS_TOPIC_ARN='${AWS_SNS_TOPIC_ARN}' \
+         AWS_CLOUDWATCH_LOG_GROUP='${AWS_CLOUDWATCH_LOG_GROUP}' \
+         bash ~/deploy_script.sh"
+        
+    - name: Setup System Service
+      env:
+        HOST: ${{ secrets.HOST }}
+        USER: ${{ secrets.USER }}
+      run: |
+        # Create service configuration script
+        cat > setup_service.sh << 'EOF'
+        #!/bin/bash
+        
+        # Create systemd service file
+        sudo tee /etc/systemd/system/construction-app.service << SERVICEEOF
+        [Unit]
+        Description=Construction Management Django App
+        After=network.target
+        
+        [Service]
+        Type=exec
+        User=ec2-user
+        Group=ec2-user
+        WorkingDirectory=/opt/construction-app/myproject
+        Environment=PATH=/opt/construction-app/venv/bin
+        Environment=PYTHONPATH=/opt/construction-app/myproject
+        ExecStart=/opt/construction-app/venv/bin/python manage.py runserver 0.0.0.0:8000
+        Restart=always
+        RestartSec=3
+        
+        [Install]
+        WantedBy=multi-user.target
+        SERVICEEOF
+        
+        # Reload systemd and start service
+        sudo systemctl daemon-reload
+        sudo systemctl enable construction-app
+        sudo systemctl start construction-app
+        
+        # Wait for service to start
+        sleep 5
+        
+        # Check service status
+        sudo systemctl status construction-app --no-pager
+        
+        echo "🚀 Service setup completed!"
+        EOF
+        
+        # Execute service setup on EC2
+        scp -o StrictHostKeyChecking=no -i private_key setup_service.sh ${USER}@${HOST}:~/
+        ssh -o StrictHostKeyChecking=no -i private_key ${USER}@${HOST} "bash ~/setup_service.sh"
+        
+    - name: Health Check
+      env:
+        HOST: ${{ secrets.HOST }}
+        USER: ${{ secrets.USER }}
+      run: |
+        # Wait for application to be ready
+        sleep 10
+        
+        # Perform health check
+        ssh -o StrictHostKeyChecking=no -i private_key ${USER}@${HOST} '
+        # Test if the application is responding
+        response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/construction/ || echo "000")
+        
+        if [ "$response" = "200" ] || [ "$response" = "302" ]; then
+            echo "✅ Application is healthy and responding!"
+            echo "🌐 Application URL: http://13.49.74.246:8000/construction/"
+            echo "🔐 Login credentials: admin/admin"
+        else
+            echo "❌ Application health check failed (HTTP $response)"
+            echo "📋 Service logs:"
+            sudo journalctl -u construction-app --no-pager -n 20
+            exit 1
+        fi
+        '
+        
+    - name: Cleanup
+      if: always()
+      run: |
+        rm -f private_key deploy_script.sh setup_service.sh

@@ -1,0 +1,74 @@
+{% extends 'construction/base.html' %}
+
+{% block title %}Projects - Construction Management{% endblock %}
+
+{% block content %}
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px;">
+    <h2>📋 Construction Projects</h2>
+    <a href="{% url 'project_create' %}" class="btn">➕ New Project</a>
+</div>
+
+{% if projects %}
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 20px;">
+        {% for project in projects %}
+            <div class="card priority-{{ project.priority|lower }}">
+                <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 10px;">
+                    <h3>{{ project.name }}</h3>
+                    <span class="status-badge status-{{ project.status|lower|cut:' ' }}">
+                        {{ project.status }}
+                    </span>
+                </div>
+                
+                <p style="color: #666; margin-bottom: 10px;">📍 {{ project.location }}</p>
+                <p style="margin-bottom: 10px;">{{ project.description|truncatewords:20 }}</p>
+                
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px; font-size: 14px;">
+                    <div>
+                        <strong>💰 Budget:</strong><br>
+                        ${{ project.budget|floatformat:2 }}
+                    </div>
+                    <div>
+                        <strong>⚡ Priority:</strong><br>
+                        {{ project.priority }}
+                    </div>
+                    <div>
+                        <strong>📅 Start:</strong><br>
+                        {{ project.start_date }}
+                    </div>
+                    <div>
+                        <strong>🏁 End:</strong><br>
+                        {{ project.end_date }}
+                    </div>
+                </div>
+                
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <small style="color: #666;">
+                        👨‍💼 {{ project.manager.username }} | 
+                        🕒 {{ project.created_at|date:"M d, Y" }}
+                    </small>
+                    <a href="{% url 'project_detail' project.id %}" class="btn" style="padding: 8px 16px; font-size: 14px;">
+                        View Details
+                    </a>
+                </div>
+            </div>
+        {% endfor %}
+    </div>
+{% else %}
+    <div style="text-align: center; padding: 60px 20px; background: #f8f9fa; border-radius: 10px;">
+        <h3 style="color: #666; margin-bottom: 20px;">🏗️ No Construction Projects Yet</h3>
+        <p style="color: #666; margin-bottom: 30px;">Start managing your construction projects by creating your first project.</p>
+        <a href="{% url 'project_create' %}" class="btn">➕ Create Your First Project</a>
+    </div>
+{% endif %}
+
+<div style="margin-top: 40px; padding: 20px; background: #e3f2fd; border-radius: 10px;">
+    <h4 style="color: #1976d2; margin-bottom: 10px;">🌟 AWS Services Integration</h4>
+    <ul style="color: #333; line-height: 1.8;">
+        <li>📁 <strong>Amazon S3:</strong> Secure document storage for project files</li>
+        <li>📧 <strong>Amazon SES:</strong> Email notifications for project updates</li>
+        <li>🔔 <strong>Amazon SNS:</strong> Push notifications for critical events</li>
+        <li>📊 <strong>Amazon CloudWatch:</strong> Real-time activity logging and monitoring</li>
+        <li>🗄️ <strong>Amazon RDS:</strong> MySQL database for production deployment</li>
+    </ul>
+</div>
+{% endblock %}
