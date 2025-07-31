@@ -26,11 +26,10 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -r myproject/requirements.txt
+        pip install -r requirements.txt
         
     - name: Run Django tests
       run: |
-        cd myproject
         python manage.py test construction --verbosity=2
 
   deploy:
@@ -87,6 +86,24 @@ jobs:
         # Clone the repository fresh
         git clone https://github.com/Abhijoshy/construction.git .
         
+        # Debug: Check the directory structure
+        echo "🔍 Checking repository structure..."
+        ls -la
+        echo "📁 Contents of current directory:"
+        find . -name "*.txt" -o -name "manage.py" -o -name "requirements.txt" | head -20
+        echo "📋 Looking for requirements.txt file:"
+        find . -name "requirements.txt" -type f
+        
+        # Check if myproject directory exists
+        if [ -d "myproject" ]; then
+            echo "✅ myproject directory found"
+            ls -la myproject/
+        else
+            echo "❌ myproject directory not found"
+            echo "Available directories:"
+            ls -la
+        fi
+        
         # Create virtual environment
         python3 -m venv venv
         source venv/bin/activate
@@ -94,8 +111,21 @@ jobs:
         # Upgrade pip
         pip install --upgrade pip
         
-        # Install all dependencies
-        pip install -r myproject/requirements.txt
+        # Debug: Check for requirements.txt file
+        echo "🔍 Looking for requirements.txt..."
+        if [ -f "requirements.txt" ]; then
+            echo "✅ Found requirements.txt in root directory"
+            echo "📋 Contents of requirements.txt:"
+            cat requirements.txt
+            pip install -r requirements.txt
+        else
+            echo "❌ requirements.txt not found"
+            echo "🔍 Searching for requirements.txt everywhere:"
+            find . -name "requirements.txt" -type f
+            echo "📁 Current directory contents:"
+            ls -la
+            exit 1
+        fi
         
         # Navigate to Django project
         cd myproject
